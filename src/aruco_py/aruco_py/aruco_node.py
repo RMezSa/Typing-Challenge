@@ -6,6 +6,8 @@ from cv_bridge import CvBridge
 
 import cv2
 import numpy as np
+from typing import List, Tuple, Optional
+import time
 
 
 
@@ -22,26 +24,63 @@ class ArucoNode(Node):
             10
         )
 
-        # ArUcos
+        # ArUcos - Dictionary
         self.dictionary = cv2.aruco.getPredefinedDictionary(
             cv2.aruco.DICT_7X7_50
         )
 
+        # Advanced detector parameters (inspired by ros_aruco_opencv)
         self.parameters = cv2.aruco.DetectorParameters_create()
-        # Parametros de detección
+        
+        # --- Adaptive thresholding parameters ---
+        self.parameters.adaptiveThreshWinSizeMin = 5  # Wider range for better robustness
+        self.parameters.adaptiveThreshWinSizeMax = 21  # Adjusted for 640x480 resolution
+        self.parameters.adaptiveThreshWinSizeStep = 4  # Finer steps
+        self.parameters.adaptiveThreshConstant = 5  # Lower for better low contrast detection
+        
+        # --- Marker geometry constraints ---
+        # More permissive for challenging conditions
+        self.parameters.minMarkerPerimeterRate = 0.01  # Smaller markers allowed
+        self.parameters.maxMarkerPerimeterRate = 4.0  # Standard max
+        self.parameters.polygonalApproxAccuracyRate = 0.03  # Higher accuracy
+        self.parameters.minCornerDistanceRate = 0.03  # Prevent merging
+        self.parameters.minMarkerDistanceRate = 0.01  # Allow close markers
+        self.parameters.minDistanceToBorder = 1  # Small border margin
+        
+        # --- Corner refinement ---
         self.parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-        self.parameters.adaptiveThreshWinSizeMin = 3
-        self.parameters.adaptiveThreshWinSizeMax = 23
-        self.parameters.adaptiveThreshWinSizeStep = 10
-        self.parameters.adaptiveThreshConstant = 7
-        # More permissive detection (reduce blinking)
-        self.parameters.minMarkerPerimeterRate = 0.015
-        self.parameters.maxMarkerPerimeterRate = 20.0
-        self.parameters.minCornerDistanceRate = 0.01
-        self.parameters.minMarkerDistanceRate = 0.01
-        self.parameters.minDistanceToBorder = 0
-        self.parameters.errorCorrectionRate = 1.0
-        self.get_logger().info("ArUco node started")
+        self.parameters.cornerRefinementWinSize = 5  # Window for subpixel
+        self.parameters.cornerRefinementMaxIterations = 60  # More iterations
+        self.parameters.cornerRefinementMinAccuracy = 0.01  # High precision
+        
+        # --- Bit extraction & decoding ---
+        self.parameters.markerBorderBits = 1  # Standard ArUco border
+        self.parameters.perspectiveRemovePixelPerCell = 4  # Resolution for bit extraction
+        self.parameters.perspectiveRemoveIgnoredMarginPerCell = 0.13  # Border margin
+        self.parameters.maxErroneousBitsInBorderRate = 0.35  # Error tolerance
+        self.parameters.errorCorrectionRate = 0.6  # Balanced error correction
+        
+        # --- Detection optimization ---
+        self.parameters.detectInvertedMarker = True  # Support inverted markers
+        
+        # Image preprocessing configuration
+        self.use_clahe = True  # Contrast Limited Adaptive Histogram Equalization
+        self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        self.use_bilateral = False  # Bilateral filter (slower but better noise reduction)
+        self.bilateral_d = 5
+        self.bilateral_sigma_color = 50
+        self.bilateral_sigma_space = 50
+        
+        # Multi-threshold detection strategy
+        self.use_multi_threshold = True
+        self.threshold_methods = ['adaptive', 'otsu', 'fixed']
+        self.fixed_threshold = 100
+        
+        # Pose estimation configuration
+        self.use_ippe_square = True  # Better pose estimation with IPPE
+        self.pose_selection_strategy = 'reprojection_error'  # or 'plane_normal'
+        
+        self.get_logger().info("ArUco node started with optimized detection parameters")
 
         # Pose stability parameters
         self.stable_frames = 0
@@ -75,6 +114,17 @@ class ArucoNode(Node):
         self.keyboard_layout = self.build_keyboard_layout()
         # If detected quad covers less than this fraction of ROI, assume full ROI is keyboard
         self.keyboard_full_roi_threshold = 0.5
+        # Keyboard contour tuning (stage 3)
+        self.keyboard_min_area_ratio = 0.12
+        self.keyboard_expected_area_ratio = 0.35
+        self.keyboard_roi_pad_ratio = 0.03
+        self.keyboard_fallback_expand_ratio = 0.2
+        # Keyboard black-surface segmentation (stage 3)
+        self.keyboard_use_black_mask = True
+        self.keyboard_black_v_thresh = 120
+        self.keyboard_black_l_thresh = 95
+        self.keyboard_black_close_iter = 4
+        self.keyboard_black_open_iter = 0
 
         # Target key to track (set this label, e.g., "Space")
         self.target_key_label = "Space"
@@ -231,6 +281,148 @@ class ArucoNode(Node):
         )
         self.prev_flow_points = pts
 
+    def preprocess_image(self, gray_frame: np.ndarray) -> np.ndarray:
+        """Apply image preprocessing optimizations for better marker detection."""
+        processed = gray_frame.copy()
+        
+        # Apply CLAHE for contrast enhancement
+        if self.use_clahe:
+            processed = self.clahe.apply(processed)
+        
+        # Apply bilateral filter for noise reduction while preserving edges
+        if self.use_bilateral:
+            processed = cv2.bilateralFilter(
+                processed, 
+                self.bilateral_d, 
+                self.bilateral_sigma_color, 
+                self.bilateral_sigma_space
+            )
+        
+        return processed
+    
+    def detect_markers_multi_threshold(self, gray_frame: np.ndarray) -> Tuple[List, np.ndarray, List]:
+        """Detect markers using multiple threshold strategies and merge results."""
+        all_corners = []
+        all_ids = []
+        seen_ids = set()
+        
+        preprocessed = self.preprocess_image(gray_frame)
+        
+        if not self.use_multi_threshold:
+            # Standard single detection
+            corners, ids, rejected = cv2.aruco.detectMarkers(
+                preprocessed, self.dictionary, parameters=self.parameters
+            )
+            return corners, ids, rejected
+        
+        # Strategy 1: Adaptive thresholding (best for varying lighting)
+        if 'adaptive' in self.threshold_methods:
+            corners_adapt, ids_adapt, _ = cv2.aruco.detectMarkers(
+                preprocessed, self.dictionary, parameters=self.parameters
+            )
+            if ids_adapt is not None:
+                for i, marker_id in enumerate(ids_adapt.flatten()):
+                    if marker_id not in seen_ids:
+                        all_corners.append(corners_adapt[i])
+                        all_ids.append(marker_id)
+                        seen_ids.add(marker_id)
+        
+        # Strategy 2: Otsu's thresholding (good for bimodal intensity distribution)
+        if 'otsu' in self.threshold_methods:
+            _, thresh_otsu = cv2.threshold(
+                preprocessed, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+            )
+            corners_otsu, ids_otsu, _ = cv2.aruco.detectMarkers(
+                thresh_otsu, self.dictionary, parameters=self.parameters
+            )
+            if ids_otsu is not None:
+                for i, marker_id in enumerate(ids_otsu.flatten()):
+                    if marker_id not in seen_ids:
+                        all_corners.append(corners_otsu[i])
+                        all_ids.append(marker_id)
+                        seen_ids.add(marker_id)
+        
+        # Strategy 3: Fixed thresholding (fallback)
+        if 'fixed' in self.threshold_methods:
+            _, thresh_fixed = cv2.threshold(
+                preprocessed, self.fixed_threshold, 255, cv2.THRESH_BINARY
+            )
+            corners_fixed, ids_fixed, _ = cv2.aruco.detectMarkers(
+                thresh_fixed, self.dictionary, parameters=self.parameters
+            )
+            if ids_fixed is not None:
+                for i, marker_id in enumerate(ids_fixed.flatten()):
+                    if marker_id not in seen_ids:
+                        all_corners.append(corners_fixed[i])
+                        all_ids.append(marker_id)
+                        seen_ids.add(marker_id)
+        
+        if len(all_ids) > 0:
+            # Convert to expected format
+            corners_array = tuple(all_corners)
+            ids_array = np.array(all_ids).reshape(-1, 1)
+            return corners_array, ids_array, []
+        else:
+            return tuple(), None, []
+    
+    def select_best_pose_ippe(self, rvecs: List[np.ndarray], tvecs: List[np.ndarray], 
+                               corners: np.ndarray, camera_matrix: Optional[np.ndarray] = None,
+                               dist_coeffs: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
+        """Select best pose from IPPE candidates based on reprojection error or plane normal."""
+        if len(rvecs) == 1:
+            return rvecs[0], tvecs[0]
+        
+        if self.pose_selection_strategy == 'reprojection_error' and camera_matrix is not None:
+            # Calculate reprojection errors for each candidate
+            errors = []
+            for rvec, tvec in zip(rvecs, tvecs):
+                # Project 3D points back to image
+                marker_size = 0.02  # 2cm markers
+                obj_points = np.array([
+                    [-marker_size/2, marker_size/2, 0],
+                    [marker_size/2, marker_size/2, 0],
+                    [marker_size/2, -marker_size/2, 0],
+                    [-marker_size/2, -marker_size/2, 0]
+                ], dtype=np.float32)
+                
+                projected, _ = cv2.projectPoints(
+                    obj_points, rvec, tvec, camera_matrix, dist_coeffs
+                )
+                projected = projected.reshape(-1, 2)
+                corners_2d = corners.reshape(-1, 2)
+                
+                # Calculate mean reprojection error
+                error = np.mean(np.linalg.norm(projected - corners_2d, axis=1))
+                errors.append(error)
+            
+            # Return pose with minimum reprojection error
+            best_idx = np.argmin(errors)
+            return rvecs[best_idx], tvecs[best_idx]
+        
+        elif self.pose_selection_strategy == 'plane_normal':
+            # Select pose where marker plane normal is most parallel to camera view
+            best_idx = 0
+            best_score = float('inf')
+            
+            for i, (rvec, tvec) in enumerate(zip(rvecs, tvecs)):
+                # Convert rotation vector to matrix
+                R, _ = cv2.Rodrigues(rvec)
+                # Marker normal in camera frame (Z-axis of marker)
+                normal = R[:, 2]
+                # Camera viewing direction is -Z in camera frame
+                view_dir = np.array([0, 0, -1])
+                # Score: angle between normal and view direction (want them parallel)
+                score = np.arccos(np.clip(np.dot(normal, view_dir), -1.0, 1.0))
+                
+                if score < best_score:
+                    best_score = score
+                    best_idx = i
+            
+            return rvecs[best_idx], tvecs[best_idx]
+        
+        # Default: return first candidate
+        return rvecs[0], tvecs[0]
+    
     def is_key_visible(self, key_in_frame, frame_w, frame_h):
         pts = key_in_frame.reshape(4, 2)
         inside = (
@@ -279,24 +471,81 @@ class ArucoNode(Node):
         # The ROI is now a clean, top-down view.
         h_roi, w_roi, _ = roi.shape
         roi_area = h_roi * w_roi
+
+        def clamp_quad(quad, w, h):
+            quad[:, 0] = np.clip(quad[:, 0], 0, w - 1)
+            quad[:, 1] = np.clip(quad[:, 1], 0, h - 1)
+            return quad
+
+        def inset_quad(quad, dx, dy):
+            quad = quad.copy()
+            quad[:, 0] = np.clip(quad[:, 0] + np.array([dx, -dx, -dx, dx]), 0, w_roi - 1)
+            quad[:, 1] = np.clip(quad[:, 1] + np.array([dy, dy, -dy, -dy]), 0, h_roi - 1)
+            return quad
+
+        def expand_quad(quad, dx, dy):
+            quad = quad.copy()
+            quad[:, 0] = quad[:, 0] + np.array([-dx, dx, dx, -dx])
+            quad[:, 1] = quad[:, 1] + np.array([-dy, -dy, dy, dy])
+            return clamp_quad(quad, w_roi, h_roi)
+
+        def approx_quad(contour):
+            peri = cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
+            if len(approx) == 4:
+                return self.order_points(approx.reshape(4, 2))
+            return None
+
+        pad_x = int(w_roi * self.keyboard_roi_pad_ratio)
+        pad_y = int(h_roi * self.keyboard_roi_pad_ratio)
+        expected_quad = np.array(
+            [[pad_x, pad_y], [w_roi - 1 - pad_x, pad_y],
+             [w_roi - 1 - pad_x, h_roi - 1 - pad_y], [pad_x, h_roi - 1 - pad_y]],
+            dtype="float32"
+        )
+        search_mask = np.zeros((h_roi, w_roi), dtype=np.uint8)
+        cv2.fillConvexPoly(search_mask, expected_quad.astype(int), 255)
         
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (5, 5), 0)
 
-        # Primary: Canny edges
-        edges = cv2.Canny(gray, 30, 120)
-        kernel = np.ones((5, 5), np.uint8)
-        edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=2)
+        # Black keyboard segmentation (preferred when keyboard is clearly dark)
+        black_contours = []
+        if self.keyboard_use_black_mask:
+            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+            lab = cv2.cvtColor(roi, cv2.COLOR_BGR2LAB)
+            v = hsv[:, :, 2]
+            l = lab[:, :, 0]
+            black_mask = cv2.inRange(v, 0, self.keyboard_black_v_thresh)
+            black_mask_l = cv2.inRange(l, 0, self.keyboard_black_l_thresh)
+            black_mask = cv2.bitwise_or(black_mask, black_mask_l)
+            black_mask = cv2.bitwise_and(black_mask, black_mask, mask=search_mask)
 
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            kernel = np.ones((5, 5), np.uint8)
+            black_mask = cv2.morphologyEx(black_mask, cv2.MORPH_CLOSE, kernel, iterations=self.keyboard_black_close_iter)
+            black_mask = cv2.morphologyEx(black_mask, cv2.MORPH_OPEN, kernel, iterations=self.keyboard_black_open_iter)
+            black_contours, _ = cv2.findContours(black_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        # Fallback: adaptive threshold + morphology to get keyboard blob
+        contours = black_contours
+
         if not contours:
-            thresh = cv2.adaptiveThreshold(
-                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 7
-            )
-            thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=2)
-            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            # Primary: Canny edges
+            edges = cv2.Canny(gray, 30, 120)
+            kernel = np.ones((5, 5), np.uint8)
+            edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+            edges = cv2.bitwise_and(edges, edges, mask=search_mask)
+
+            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            # Fallback: adaptive threshold + morphology to get keyboard blob
+            if not contours:
+                thresh = cv2.adaptiveThreshold(
+                    gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 7
+                )
+                thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=2)
+                thresh = cv2.bitwise_and(thresh, thresh, mask=search_mask)
+                contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         if not contours:
             return None, roi
@@ -310,7 +559,7 @@ class ArucoNode(Node):
             area = cv2.contourArea(contour)
 
             # Ensure contour is a large part of the ROI (relaxed)
-            if area < (roi_area * 0.2):
+            if area < (roi_area * self.keyboard_min_area_ratio):
                 continue
 
             rect = cv2.minAreaRect(contour)
@@ -323,8 +572,10 @@ class ArucoNode(Node):
 
             # Aspect ratio for a rectified keyboard
             if 1.3 < aspect_ratio < 5.0:
-                box = cv2.boxPoints(rect)
-                ordered = self.order_points(box)
+                ordered = approx_quad(contour)
+                if ordered is None:
+                    box = cv2.boxPoints(rect)
+                    ordered = self.order_points(box)
 
                 if area > best_area:
                     best_area = area
@@ -332,10 +583,11 @@ class ArucoNode(Node):
 
         # If we found a candidate quad, decide whether it represents the whole keyboard
         if best_quad is not None:
-            # If quad is too small, assume full ROI is keyboard (markers near edges)
-            if best_area < (roi_area * self.keyboard_full_roi_threshold):
-                full = np.array([[0, 0], [w_roi - 1, 0], [w_roi - 1, h_roi - 1], [0, h_roi - 1]], dtype="float32")
-                best_quad = full
+            # If quad is smaller than expected, expand it instead of forcing full ROI
+            if best_area < (roi_area * self.keyboard_expected_area_ratio):
+                expand_x = int(w_roi * self.keyboard_fallback_expand_ratio)
+                expand_y = int(h_roi * self.keyboard_fallback_expand_ratio)
+                best_quad = expand_quad(best_quad, expand_x, expand_y)
 
             cv2.drawContours(roi, [best_quad.astype(int)], -1, (0, 255, 0), 3)
 
@@ -457,12 +709,9 @@ class ArucoNode(Node):
                 self.layout_lock_quad = None
 
         self.status_text = "GLOBAL"
-        gray_thresh = cv2.adaptiveThreshold(gray_frame, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                            cv2.THRESH_BINARY, 11, 2)
-
-        corners, ids, _ = cv2.aruco.detectMarkers(
-            gray_thresh, self.dictionary, parameters=self.parameters
-        )
+        
+        # Use optimized multi-threshold detection
+        corners, ids, _ = self.detect_markers_multi_threshold(gray_frame)
 
         # Update state with any currently visible markers
         if ids is not None:
@@ -873,7 +1122,7 @@ class ArucoNode(Node):
                         ).reshape(4, 2)
                         self.last_keyboard_quad_frame = quad_frame
         else:
-            self.get_logger().info(f"Found {len(fresh_markers)} fresh markers baby gurl, waiting for exactly 4.", throttle_duration_sec=1.0)
+            self.get_logger().info(f"Found {len(fresh_markers)} fresh markers, waiting for exactly 4.", throttle_duration_sec=1.0)
 
         cv2.putText(frame, f"STATE: {self.status_text}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
         cv2.imshow("ArUco Detection", frame)
