@@ -1,0 +1,21 @@
+# Logitech C505 HD configuration
+# Resolution: up to 1280x720 @ 30fps
+# Note: C505 often works best with YUYV to avoid color shifts.
+
+v4l2_camera:
+  ros__parameters:
+    # Image format
+    image_size: [1280, 720]
+    pixel_format: "yuyv"    # C505 stable color output
+    camera_frame_id: "camera"
+    time_per_frame: [1, 30]  # 30 fps
+
+    # Output format (match OpenCV default)
+    output_encoding: "bgr8"
+
+    # Camera info
+    camera_info_url: "file:///home/roberd/.ros/camera_info/c505.yaml"
+
+# Alternative settings to try if needed:
+# - pixel_format: "mjpeg" (better performance, but can cause color shifts)
+# - image_size: [640, 480] for higher FPS / lower CPU

@@ -1,0 +1,47 @@
+running egg_info
+creating ../../build/aruco_py/aruco_py.egg-info
+writing ../../build/aruco_py/aruco_py.egg-info/PKG-INFO
+writing dependency_links to ../../build/aruco_py/aruco_py.egg-info/dependency_links.txt
+writing entry points to ../../build/aruco_py/aruco_py.egg-info/entry_points.txt
+writing requirements to ../../build/aruco_py/aruco_py.egg-info/requires.txt
+writing top-level names to ../../build/aruco_py/aruco_py.egg-info/top_level.txt
+writing manifest file '../../build/aruco_py/aruco_py.egg-info/SOURCES.txt'
+reading manifest file '../../build/aruco_py/aruco_py.egg-info/SOURCES.txt'
+writing manifest file '../../build/aruco_py/aruco_py.egg-info/SOURCES.txt'
+running build
+running build_py
+creating /home/roberd/ros2_ws/src/aruco_py/aruco_py/build/aruco_py/build
+creating /home/roberd/ros2_ws/src/aruco_py/aruco_py/build/aruco_py/build/lib
+creating /home/roberd/ros2_ws/src/aruco_py/aruco_py/build/aruco_py/build/lib/aruco_py
+copying aruco_py/__init__.py -> /home/roberd/ros2_ws/src/aruco_py/aruco_py/build/aruco_py/build/lib/aruco_py
+copying aruco_py/aruco_node_bck4.py -> /home/roberd/ros2_ws/src/aruco_py/aruco_py/build/aruco_py/build/lib/aruco_py
+copying aruco_py/aruco_node.py -> /home/roberd/ros2_ws/src/aruco_py/aruco_py/build/aruco_py/build/lib/aruco_py
+running install
+running install_lib
+creating /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/lib/python3.10/site-packages/aruco_py
+copying /home/roberd/ros2_ws/src/aruco_py/aruco_py/build/aruco_py/build/lib/aruco_py/__init__.py -> /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/lib/python3.10/site-packages/aruco_py
+copying /home/roberd/ros2_ws/src/aruco_py/aruco_py/build/aruco_py/build/lib/aruco_py/aruco_node_bck4.py -> /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/lib/python3.10/site-packages/aruco_py
+copying /home/roberd/ros2_ws/src/aruco_py/aruco_py/build/aruco_py/build/lib/aruco_py/aruco_node.py -> /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/lib/python3.10/site-packages/aruco_py
+byte-compiling /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/lib/python3.10/site-packages/aruco_py/__init__.py to __init__.cpython-310.pyc
+byte-compiling /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/lib/python3.10/site-packages/aruco_py/aruco_node_bck4.py to aruco_node_bck4.cpython-310.pyc
+byte-compiling /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/lib/python3.10/site-packages/aruco_py/aruco_node.py to aruco_node.cpython-310.pyc
+running install_data
+creating /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/share/ament_index
+creating /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/share/ament_index/resource_index
+creating /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/share/ament_index/resource_index/packages
+copying resource/aruco_py -> /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/share/ament_index/resource_index/packages
+copying package.xml -> /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/share/aruco_py
+creating /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/share/aruco_py/launch
+copying launch/aruco_optimized.launch.py -> /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/share/aruco_py/launch
+creating /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/share/aruco_py/config
+copying config/camera_720p.yaml -> /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/share/aruco_py/config
+copying config/aruco_advanced.yaml -> /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/share/aruco_py/config
+copying config/camera_c920.yaml -> /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/share/aruco_py/config
+creating /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/share/aruco_py/scripts
+copying scripts/optimize_camera.sh -> /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/share/aruco_py/scripts
+copying CAMERA_SETUP.md -> /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/share/aruco_py
+running install_egg_info
+Copying ../../build/aruco_py/aruco_py.egg-info to /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/lib/python3.10/site-packages/aruco_py-0.0.0-py3.10.egg-info
+running install_scripts
+Installing aruco_node script to /home/roberd/ros2_ws/src/aruco_py/aruco_py/install/aruco_py/lib/aruco_py
+writing list of installed files to '/home/roberd/ros2_ws/src/aruco_py/aruco_py/build/aruco_py/install.log'

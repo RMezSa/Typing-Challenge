@@ -1,0 +1,3 @@
+[console_scripts]
+aruco_node = aruco_py.aruco_node:main
+

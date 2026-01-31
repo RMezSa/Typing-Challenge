@@ -1,3 +1,4 @@
+
 import rclpy
 from rclpy.node import Node
 
@@ -64,7 +65,7 @@ class ArucoNode(Node):
         self.parameters.detectInvertedMarker = True  # Support inverted markers
         
         # Image preprocessing configuration
-        self.use_clahe = False  # Contrast Limited Adaptive Histogram Equalization
+        self.use_clahe = True  # Contrast Limited Adaptive Histogram Equalization
         self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         self.use_bilateral = False  # Bilateral filter (slower but better noise reduction)
         self.bilateral_d = 5
@@ -72,7 +73,7 @@ class ArucoNode(Node):
         self.bilateral_sigma_space = 50
         
         # Multi-threshold detection strategy
-        self.use_multi_threshold = False
+        self.use_multi_threshold = True
         self.threshold_methods = ['adaptive', 'otsu', 'fixed']
         self.fixed_threshold = 100
         
@@ -85,7 +86,7 @@ class ArucoNode(Node):
         # Pose stability parameters
         self.stable_frames = 0
         self.required_stable_frames = 90
-        self.stable_thresh_px = 3.0
+        self.stable_thresh_px = .1
         self.last_target_pos = None
 
         # --- State for robust detection ---
@@ -119,6 +120,12 @@ class ArucoNode(Node):
         self.keyboard_expected_area_ratio = 0.35
         self.keyboard_roi_pad_ratio = 0.03
         self.keyboard_fallback_expand_ratio = 0.2
+        # If the keyboard corner is close to the ROI corner (in warped ROI px), snap it
+        self.keyboard_corner_snap_px = 27
+        # Marker must be close to the keyboard quad corner (in warped ROI px)
+        self.keyboard_marker_to_kb_corner_px = 90
+        # Debug overlay for snap behavior
+        self.keyboard_snap_debug = True
         # Keyboard black-surface segmentation (stage 3)
         self.keyboard_use_black_mask = True
         self.keyboard_black_v_thresh = 120
@@ -185,7 +192,7 @@ class ArucoNode(Node):
 
         self.pose_lock = False
         self.pose_lock_threshold_px = 40
-        self.pose_lock_delay_sec = 0.5
+        self.pose_lock_delay_sec = 2.0
         self.pose_lock_start_time = None
 
         # Homography stability tracking
@@ -203,6 +210,82 @@ class ArucoNode(Node):
         bl = pts[np.argmax(diff)]
 
         return np.array([tl, tr, br, bl], dtype="float32")
+
+    def snap_keyboard_quad_to_roi(self, keyboard_quad, M, fresh_markers, corner_ids, w_dst, h_dst):
+        if keyboard_quad is None or M is None:
+            return keyboard_quad, [False, False, False, False]
+
+        if not fresh_markers or corner_ids is None:
+            return keyboard_quad, [False, False, False, False]
+
+        tl_id, tr_id, br_id, bl_id = corner_ids
+        if tl_id not in fresh_markers or tr_id not in fresh_markers or br_id not in fresh_markers or bl_id not in fresh_markers:
+            return keyboard_quad, [False, False, False, False]
+
+        centers_frame = np.array([
+            np.mean(fresh_markers[tl_id][0], axis=0),
+            np.mean(fresh_markers[tr_id][0], axis=0),
+            np.mean(fresh_markers[br_id][0], axis=0),
+            np.mean(fresh_markers[bl_id][0], axis=0)
+        ], dtype=np.float32).reshape(-1, 1, 2)
+
+        centers_warp = cv2.perspectiveTransform(centers_frame, M).reshape(4, 2)
+
+        roi_corners = np.array(
+            [[0, 0], [w_dst - 1, 0], [w_dst - 1, h_dst - 1], [0, h_dst - 1]],
+            dtype=np.float32
+        )
+
+        adjusted = keyboard_quad.copy()
+        snapped = [False, False, False, False]
+        for i in range(4):
+            dist_marker_to_kb = np.linalg.norm(centers_warp[i] - keyboard_quad[i])
+            dist_kb_to_roi = np.linalg.norm(keyboard_quad[i] - roi_corners[i])
+            if dist_marker_to_kb <= self.keyboard_marker_to_kb_corner_px and dist_kb_to_roi <= self.keyboard_corner_snap_px:
+                adjusted[i] = roi_corners[i]
+                snapped[i] = True
+
+        return adjusted, snapped
+
+    def draw_snap_debug(self, warped_roi, snapped, w_dst, h_dst):
+        if warped_roi is None:
+            return
+
+        has_snap = bool(snapped) and any(snapped)
+
+        if not has_snap:
+            cv2.putText(
+                warped_roi, "SNAP INACTIVE",
+                (10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7, (0, 255, 255), 2
+            )
+            return
+
+        labels = ["TL", "TR", "BR", "BL"]
+        roi_corners = np.array(
+            [[0, 0], [w_dst - 1, 0], [w_dst - 1, h_dst - 1], [0, h_dst - 1]],
+            dtype=np.float32
+        )
+
+        cv2.putText(
+            warped_roi, "SNAP ACTIVE",
+            (10, 25),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7, (0, 0, 255), 2
+        )
+
+        for i, flag in enumerate(snapped):
+            if not flag:
+                continue
+            x, y = int(roi_corners[i][0]), int(roi_corners[i][1])
+            cv2.circle(warped_roi, (x, y), 6, (0, 0, 255), -1)
+            cv2.putText(
+                warped_roi, f"SNAP {labels[i]}",
+                (x + 6, y + 18),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6, (0, 0, 255), 2
+            )
 
     def build_keyboard_layout(self):
         layout = []
@@ -737,6 +820,7 @@ class ArucoNode(Node):
         keyboard_quad = None
         roi_debug = None
         w_dst, h_dst = 800, 400
+        corner_ids = None
 
         # 2. Proceed if we have exactly 4 fresh markers
         if aruco_visible and not self.key_track_active:
@@ -754,6 +838,8 @@ class ArucoNode(Node):
             tr_id, _ = top_row[1]
             bl_id, _ = bottom_row[0]
             br_id, _ = bottom_row[1]
+
+            corner_ids = (tl_id, tr_id, br_id, bl_id)
 
             pts_src = np.array([
                 fresh_markers[tl_id][0][0],
@@ -805,6 +891,19 @@ class ArucoNode(Node):
                     )
 
                 if keyboard_quad is not None:
+                    if aruco_visible and corner_ids is not None:
+                        keyboard_quad, snap_flags = self.snap_keyboard_quad_to_roi(
+                            keyboard_quad, M, fresh_markers, corner_ids, w_dst, h_dst
+                        )
+                        if self.keyboard_snap_debug:
+                            self.draw_snap_debug(warped_roi, snap_flags, w_dst, h_dst)
+                            if any(snap_flags):
+                                labels = ["TL", "TR", "BR", "BL"]
+                                active = [labels[i] for i, f in enumerate(snap_flags) if f]
+                                self.get_logger().info(
+                                    f"Snap active: {','.join(active)}",
+                                    throttle_duration_sec=1.0
+                                )
                     quad_frame = cv2.perspectiveTransform(
                         keyboard_quad.reshape(4, 1, 2).astype(np.float32), M_inv
                     ).reshape(4, 2)
@@ -909,6 +1008,19 @@ class ArucoNode(Node):
                         keyboard_quad = self.last_keyboard_quad
 
                 if keyboard_quad is not None:
+                    if aruco_visible and corner_ids is not None:
+                        keyboard_quad, snap_flags = self.snap_keyboard_quad_to_roi(
+                            keyboard_quad, M, fresh_markers, corner_ids, w_dst, h_dst
+                        )
+                        if self.keyboard_snap_debug:
+                            self.draw_snap_debug(warped_roi, snap_flags, w_dst, h_dst)
+                            if any(snap_flags):
+                                labels = ["TL", "TR", "BR", "BL"]
+                                active = [labels[i] for i, f in enumerate(snap_flags) if f]
+                                self.get_logger().info(
+                                    f"Snap active: {','.join(active)}",
+                                    throttle_duration_sec=1.0
+                                )
                     # Build canonical keyboard space
                     kb_w, kb_h = self.keyboard_size
                     kb_dst = np.array(
@@ -1036,18 +1148,11 @@ class ArucoNode(Node):
                         dx = tx - cx_frame
                         dy = ty - cy_frame
 
-                        stable_ready = aruco_visible and (
-                            self.homography_stable_frames >= self.homography_stable_required
-                        )
-
-                        if self.autonomous_mode and self.current_typing_target is not None:
-                            self.pose_lock = stable_ready
+                        if aruco_visible:
+                            self.pose_lock = True
                         else:
-                            if aruco_visible:
-                                self.pose_lock = stable_ready
-                            else:
-                                self.pose_lock = (abs(dx) < self.pose_lock_threshold_px and
-                                                  abs(dy) < self.pose_lock_threshold_px)
+                            self.pose_lock = (abs(dx) < self.pose_lock_threshold_px and
+                                              abs(dy) < self.pose_lock_threshold_px)
 
                         if self.pose_lock and not self.key_track_active:
                             if self.pose_lock_start_time is None:

@@ -1,0 +1,134 @@
+# Advanced ArUco Detection Parameters
+# Inspired by ros_aruco_opencv optimization strategies
+# Adjust these parameters based on your specific conditions
+
+aruco_node:
+  ros__parameters:
+    # Dictionary Configuration
+    dictionary_type: "DICT_7X7_50"  # Options: DICT_4X4_50, DICT_5X5_50, DICT_6X6_50, DICT_7X7_50, etc.
+    
+    # ====================
+    # Adaptive Thresholding
+    # ====================
+    # Window size range for adaptive thresholding
+    adaptive_thresh_win_size_min: 3     # Min: 3, Recommended: 5-7
+    adaptive_thresh_win_size_max: 21     # Max: 23, Adjusted for 640x480
+    adaptive_thresh_win_size_step: 4     # Step: 2-4, Finer steps = better but slower
+    adaptive_thresh_constant: 3          # Constant subtracted from mean (lower = detect darker markers)
+    
+    # ====================
+    # Marker Geometry Constraints
+    # ====================
+    # Perimeter rate limits (relative to image diagonal)
+    min_marker_perimeter_rate: 0.005      # Min: 0.01 (smaller markers), Default: 0.03
+    max_marker_perimeter_rate: 4.0       # Max: 4.0 (standard)
+    
+    # Marker quality constraints
+    polygonal_approx_accuracy_rate: 0.03  # Corner approximation accuracy (lower = more precise)
+    min_corner_distance_rate: 0.03        # Min distance between corners (prevent merging)
+    min_marker_distance_rate: 0.01        # Min distance between markers
+    min_distance_to_border: 1             # Pixels from image border
+    
+    # ====================
+    # Corner Refinement
+    # ====================
+    # Method: CORNER_REFINE_NONE, CORNER_REFINE_SUBPIX, CORNER_REFINE_CONTOUR, CORNER_REFINE_APRILTAG
+    corner_refinement_method: "CORNER_REFINE_SUBPIX"
+    corner_refinement_win_size: 5         # Subpixel window size
+    corner_refinement_max_iterations: 60  # Max iterations for convergence
+    corner_refinement_min_accuracy: 0.01  # Min accuracy for stopping
+    
+    # ====================
+    # Bit Extraction & Decoding
+    # ====================
+    marker_border_bits: 1                         # Standard ArUco border width
+    perspective_remove_pixel_per_cell: 4          # Resolution for bit extraction (higher = better quality)
+    perspective_remove_ignored_margin_per_cell: 0.13  # Border margin ignored during extraction
+    max_erroneous_bits_in_border_rate: 0.35       # Max error rate in border (0-1)
+    error_correction_rate: 0.6                    # Error correction tolerance (0=none, 1=full)
+    
+    # ====================
+    # Detection Optimization
+    # ====================
+    detect_inverted_marker: true          # Detect white markers on black background
+    
+    # ====================
+    # Image Preprocessing
+    # ====================
+    # CLAHE (Contrast Limited Adaptive Histogram Equalization)
+    use_clahe: true                       # Enable CLAHE preprocessing
+    clahe_clip_limit: 1.5                 # Contrast limiting (1.0-4.0)
+    clahe_tile_grid_size: 8               # Grid size for local histogram equalization
+    
+    # Bilateral Filter (noise reduction while preserving edges)
+    use_bilateral_filter: false           # Enable bilateral filtering (slower)
+    bilateral_d: 5                        # Diameter of pixel neighborhood
+    bilateral_sigma_color: 50             # Color space sigma
+    bilateral_sigma_space: 50             # Coordinate space sigma
+    
+    # ====================
+    # Multi-Threshold Strategy
+    # ====================
+    use_multi_threshold: true             # Use multiple threshold methods
+    # Available methods: 'adaptive', 'otsu', 'fixed'
+    threshold_methods:
+      - 'adaptive'                        # Adaptive thresholding (best for varying lighting)
+      - 'otsu'                            # Otsu's method (good for bimodal distribution)
+      - 'fixed'                           # Fixed threshold (fallback)
+    fixed_threshold: 100                  # Fixed threshold value (0-255)
+    
+    # ====================
+    # Pose Estimation
+    # ====================
+    use_ippe_square: true                 # Use IPPE algorithm for better pose estimation
+    # Pose selection: 'reprojection_error' or 'plane_normal'
+    pose_selection_strategy: "reprojection_error"
+    marker_size: 0.02                     # Physical marker size in meters (2cm)
+    
+    # ====================
+    # Performance Tuning
+    # ====================
+    # Detection frequency (skip frames for better performance)
+    detection_skip_frames: 0              # Process every Nth frame (0 = process all)
+    
+    # Parallel processing (if supported)
+    use_parallel: false                   # Enable parallel marker processing
+    
+    # ====================
+    # Robustness Parameters
+    # ====================
+    # Marker memory/persistence
+    stale_threshold_seconds: 2.5          # How long to remember last seen markers
+    
+    # Tracking parameters
+    stable_frames_required: 90            # Frames needed for stable detection
+    stable_threshold_px: 0.1              # Pixel threshold for stability
+    
+    # Pose lock parameters
+    pose_lock_threshold_px: 40            # Pixels for pose lock
+    pose_lock_delay_sec: 2.0              # Delay before entering tracking mode
+    
+    # ====================
+    # Camera-Specific Tuning
+    # ====================
+    # Adjust these based on your camera and lighting conditions
+    
+    # For low light conditions:
+    # - Increase adaptive_thresh_constant (7-10)
+    # - Decrease clahe_clip_limit (1.5-2.0)
+    # - Increase error_correction_rate (0.7-0.8)
+    
+    # For high contrast conditions:
+    # - Decrease adaptive_thresh_constant (3-5)
+    # - Increase clahe_clip_limit (2.5-3.5)
+    
+    # For motion blur:
+    # - Enable bilateral_filter
+    # - Increase corner_refinement_max_iterations (80-100)
+    
+    # For small markers:
+    # - Decrease min_marker_perimeter_rate (0.005-0.01)
+    # - Increase perspective_remove_pixel_per_cell (5-6)
+    
+    # For large markers or close distance:
+    # - Increase max_marker_perimeter_rate (5.0-8.0)

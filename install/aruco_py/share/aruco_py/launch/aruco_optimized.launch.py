@@ -18,13 +18,13 @@ def generate_launch_description():
         default_value='/dev/video0',
         description='Camera device path'
     )
+    
     # Get config file path
     config_file = PathJoinSubstitution([
         FindPackageShare('aruco_py'),
         'config',
         LaunchConfiguration('camera_config')
     ])
-    
     
     # Camera node
     camera_node = Node(

@@ -13,11 +13,6 @@ ros2 launch aruco_py aruco_optimized.launch.py camera_config:=camera_c920.yaml
 ros2 launch aruco_py aruco_optimized.launch.py camera_config:=camera_720p.yaml
 ```
 
-### For Logitech C505 HD:
-```bash
-ros2 launch aruco_py aruco_optimized.launch.py camera_config:=camera_c505.yaml
-```
-
 ### Without optimization (use camera defaults):
 ```bash
 ros2 launch aruco_py aruco_optimized.launch.py optimize_camera:=false
@@ -40,7 +35,6 @@ cd /home/roberd/ros2_ws/src/aruco_py
 
 ### Edit config files:
 - C920: `config/camera_c920.yaml`
-- C505: `config/camera_c505.yaml`
 - 720p: `config/camera_720p.yaml`
 
 ### Common adjustments:

@@ -22,6 +22,11 @@ ros2 launch aruco_py aruco_optimized.launch.py
 ros2 launch aruco_py aruco_optimized.launch.py camera_config:=camera_720p.yaml
 ```
 
+### 2b. Launch with Logitech C505 HD
+```bash
+ros2 launch aruco_py aruco_optimized.launch.py camera_config:=camera_c505.yaml
+```
+
 ### 3. Use different camera device
 ```bash
 ros2 launch aruco_py aruco_optimized.launch.py device:=/dev/video2
